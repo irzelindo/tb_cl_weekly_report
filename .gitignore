@@ -7,3 +7,7 @@ reports/*.xlsx
 reports/**/*.xlsx
 reports/**/*.xls
 .env
+# Evitar publicar dados de pacientes
+reports/**/*.xlsx
+reports/**/*.xls
+.env
