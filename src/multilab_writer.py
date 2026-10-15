@@ -280,6 +280,186 @@ def write_results(wb, data, protection_password):
     return last
 
 
+
+def write_rejections(wb, data, week_start, week_end):
+    """Folha compacta de motivos: ranking PT/EN e detalhe por código/descrição.
+
+    O total de cada laboratório tem de conciliar com a Query 05.
+    A categoria COM/Comentário continua visível, marcada para revisão.
+    """
+    from collections import defaultdict
+    from openpyxl.styles import PatternFill
+    from openpyxl.formatting.rule import DataBarRule
+    from openpyxl.utils import get_column_letter
+
+    name = "Rejeições"
+    ws = wb[name] if name in wb.sheetnames else wb.create_sheet(name, 4)
+    ws.sheet_view.showGridLines = False
+
+    # Conciliar com a população (mesmo período e laboratório) da Query 05.
+    groups = defaultdict(lambda: defaultdict(int))
+    detailed = []
+    for lab in LABS:
+        rows = data[lab].get("rejeicoes", [])
+        total_reasons = 0
+        for rec in rows:
+            count = int(rec.get("Quantidade") or 0)
+            if count < 0:
+                raise ValueError("Quantidade negativa de motivos de rejeição.")
+            category = rec.get("MotivoAgrupado") or "Outros / não classificados"
+            groups[category][lab] += count
+            total_reasons += count
+            detailed.append((
+                lab, category,
+                rec.get("CodigoOriginal") or "(sem código)",
+                rec.get("DescricaoOriginal") or "(sem descrição)",
+                count,
+            ))
+        count_main = metric_value(data, lab, "Rejeitadas")
+        if count_main is None or int(count_main) != total_reasons:
+            raise ValueError(
+                f"Rejeições não conciliadas em {lab}: "
+                f"fluxo={count_main}, motivos={total_reasons}. "
+                "Validar os filtros antes de divulgar o relatório."
+            )
+
+    for row in ws:
+        for cell in row:
+            if not isinstance(cell, MergedCell):
+                cell.value = None
+
+    ws.merge_cells("A1:H2")
+    ws["A1"] = "REJEIÇÕES — MOTIVOS EQUIVALENTES POR LABORATÓRIO"
+    ws["A1"].fill = PatternFill("solid", fgColor="F4B183")
+    ws["A1"].font = Font(name="Cambria", bold=True, size=14, color="242424")
+    ws["A1"].alignment = Alignment(horizontal="center", vertical="center")
+
+    ws.merge_cells("A3:H3")
+    ws["A3"] = (
+        f"Registos de {week_start:%d/%m/%Y} a {week_end:%d/%m/%Y} | "
+        "uma rejeição por amostra; COM/Comentário requer validação."
+    )
+    ws["A3"].font = Font(name="Cambria", size=10, italic=True)
+    ws["A3"].alignment = Alignment(vertical="center", wrap_text=True)
+    ws.row_dimensions[3].height = 28
+
+    summary_headers = [
+        "Motivo agrupado", *LABS, "Total", "% do total", "Observação"
+    ]
+    for col, label in enumerate(summary_headers, 1):
+        safe_write(ws, 5, col, label)
+
+    totals = {}
+    for group, per_lab in groups.items():
+        totals[group] = sum(per_lab.values())
+    grand_total = sum(totals.values())
+    ordered = sorted(groups, key=lambda g: (-totals[g], g.casefold()))
+
+    for idx, group in enumerate(ordered, start=6):
+        safe_write(ws, idx, 1, group)
+        for col, lab in enumerate(LABS, start=2):
+            safe_write(ws, idx, col, groups[group][lab], "0")
+        safe_write(ws, idx, 6, totals[group], "0")
+        safe_write(ws, idx, 7, totals[group] / grand_total if grand_total else None, "0.0%")
+        safe_write(
+            ws, idx, 8,
+            "Conferir significado do código no LIMS"
+            if ("Comentário" in group or "por validar" in group)
+            else ""
+        )
+        ws.row_dimensions[idx].height = 27
+
+    summary_end = 5 + len(ordered)
+    total_row = summary_end + 1
+    safe_write(ws, total_row, 1, "TOTAL SEMANAL")
+    for col, lab in enumerate(LABS, start=2):
+        safe_write(ws, total_row, col, sum(groups[g][lab] for g in ordered), "0")
+    safe_write(ws, total_row, 6, grand_total, "0")
+    safe_write(ws, total_row, 7, 1 if grand_total else None, "0.0%")
+
+    # Motivos originais para investigação de equivalências entre idiomas.
+    details_title = total_row + 3
+    ws.merge_cells(
+        start_row=details_title, start_column=1,
+        end_row=details_title, end_column=8
+    )
+    ws.cell(details_title, 1, "DETALHE AUDITÁVEL — CÓDIGO E DESCRIÇÃO ORIGINAIS")
+    detail_header_row = details_title + 1
+    columns = [
+        "Laboratório", "Motivo agrupado", "Código original",
+        "Descrição original", "Quantidade", "% dentro do laboratório"
+    ]
+    for col, label in enumerate(columns, start=1):
+        safe_write(ws, detail_header_row, col, label)
+    detailed.sort(key=lambda r: (LABS.index(r[0]), -r[4], r[1], r[2]))
+    lab_totals = {lab: sum(groups[g][lab] for g in ordered) for lab in LABS}
+    for row_no, (lab, group, code, desc, count) in enumerate(
+        detailed, start=detail_header_row + 1
+    ):
+        values = (
+            lab, group, code, desc, count,
+            count / lab_totals[lab] if lab_totals[lab] else None
+        )
+        for col, value in enumerate(values, 1):
+            safe_write(ws, row_no, col, value, "0.0%" if col == 6 else
+                       "0" if col == 5 else None)
+
+    light_border = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
+    header_fill = PatternFill("solid", fgColor="F4B183")
+    total_fill = PatternFill("solid", fgColor="D9E2F3")
+    warning_fill = PatternFill("solid", fgColor="FFF2CC")
+    for hdr in (5, detail_header_row):
+        for cell in ws[hdr][:8 if hdr == 5 else 6]:
+            cell.font = Font(name="Cambria", size=10, bold=True)
+            cell.fill = header_fill
+            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+            cell.border = light_border
+        ws.row_dimensions[hdr].height = 34
+
+    for row_num in range(6, total_row + 1):
+        for col in range(1, 9):
+            cell = ws.cell(row_num, col)
+            cell.font = Font(name="Cambria", size=10, bold=(row_num == total_row))
+            cell.border = light_border
+            cell.alignment = Alignment(
+                horizontal="left" if col in (1, 8) else "center",
+                vertical="center", wrap_text=True
+            )
+            if row_num == total_row:
+                cell.fill = total_fill
+            elif "Comentário" in str(ws.cell(row_num, 1).value):
+                cell.fill = warning_fill
+
+    for row_num in range(detail_header_row + 1, detail_header_row + 1 + len(detailed)):
+        for col in range(1, 7):
+            cell = ws.cell(row_num, col)
+            cell.font = Font(name="Cambria", size=10)
+            cell.border = light_border
+            cell.alignment = Alignment(
+                horizontal="left" if col in (1,2,3,4) else "center",
+                vertical="center", wrap_text=True
+            )
+    for col, width in dict(A=38, B=15, C=15, D=39, E=14, F=15, G=14, H=39).items():
+        ws.column_dimensions[col].width = width
+
+    if ordered:
+        ws.conditional_formatting.add(
+            f"F6:F{summary_end}",
+            DataBarRule(start_type="num", start_value=0,
+                        end_type="max", color="F4B183", showValue=True)
+        )
+    if detailed:
+        ws.auto_filter.ref = (
+            f"A{detail_header_row}:F{detail_header_row + len(detailed)}"
+        )
+    ws.freeze_panes = "B6"
+    ws.print_options.horizontalCentered = True
+    ws.sheet_properties.pageSetUpPr.fitToPage = True
+    ws.page_setup.orientation = "landscape"
+    ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 0
+    return grand_total
+
 def generate_multilab_excel(template_path, output_path, week_start, week_end,
                             data, report_password, sheet_password):
     if not report_password:
@@ -299,6 +479,7 @@ def generate_multilab_excel(template_path, output_path, week_start, week_end,
     write_backlog(wb, data)
     write_resistance(wb, data)
     write_results(wb, data, sheet_password or report_password)
+    write_rejections(wb, data, week_start, week_end)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     temp = tempfile.NamedTemporaryFile(prefix=".tb_plain_", suffix=".xlsx",
                                        dir=output_path.parent, delete=False)
