@@ -457,6 +457,9 @@ def write_rejections(wb, data, week_start, week_end):
         )
     ws.freeze_panes = "B6"
     ws.print_options.horizontalCentered = True
+    from openpyxl.worksheet.properties import PageSetupProperties
+    if ws.sheet_properties.pageSetUpPr is None:
+        ws.sheet_properties.pageSetUpPr = PageSetupProperties()
     ws.sheet_properties.pageSetUpPr.fitToPage = True
     ws.page_setup.orientation = "landscape"
     ws.page_setup.fitToWidth = 1
