@@ -1,4 +1,5 @@
 SET NOCOUNT ON;
+/* Rejeitadas: pelo menos um campo de rejeição preenchido. Não inferir método MGIT/LJ onde não há resultado/marca de método. */
 
 /*
 Fluxo semanal + backlog à data de corte. SQL Server 2014.
@@ -15,6 +16,7 @@ DECLARE @LastDay DATE = DATEADD(DAY, -1, @WeekEnd);
     SELECT
         T.ID, T.HL7SexCode, T.RegisteredDateTime, T.AnalysisDateTime,
         T.AuthorisedDateTime, T.HL7ResultStatusCode,
+        T.LIMSRejectionCode, T.LIMSRejectionDesc,
         T.LiquidCultureResult, T.SolidCultureResult,
         T.FinalMGITCultureResult, T.FinalLJCultureResult,
         T.FinalMGITResultDate, T.FinalLJResultDate,
@@ -55,6 +57,13 @@ DECLARE @LastDay DATE = DATEADD(DAY, -1, @WeekEnd);
 Flags AS (
     SELECT O.*,
         CASE WHEN O.RegisteredDateTime >= @WeekStart
+              AND O.RegisteredDateTime < @WeekEnd
+              AND (
+                NULLIF(LTRIM(RTRIM(O.LIMSRejectionCode)), '') IS NOT NULL
+                OR NULLIF(LTRIM(RTRIM(O.LIMSRejectionDesc)), '') IS NOT NULL
+              )
+          THEN 1 ELSE 0 END AS RejeitadaNaSemana,
+        CASE WHEN O.RegisteredDateTime >= @WeekStart
                AND O.RegisteredDateTime < @WeekEnd THEN 1 ELSE 0 END AS RegistadaNaSemana,
         CASE WHEN O.AnalysisDateTime >= @WeekStart
                AND O.AnalysisDateTime < @WeekEnd THEN 1 ELSE 0 END AS TestadaNaSemana,
@@ -81,19 +90,12 @@ Flags AS (
 SELECT
     @LabName AS Laboratorio,
     X.Codigo,
-    CASE WHEN X.Codigo LIKE '%Rejeitadas' THEN CAST(NULL AS INT)
-         ELSE SUM(CASE WHEN X.Flag = 1 AND F.HL7SexCode = 'M' THEN 1 ELSE 0 END)
-    END AS Homens,
-    CASE WHEN X.Codigo LIKE '%Rejeitadas' THEN CAST(NULL AS INT)
-         ELSE SUM(CASE WHEN X.Flag = 1 AND F.HL7SexCode = 'F' THEN 1 ELSE 0 END)
-    END AS Mulheres,
-    CASE WHEN X.Codigo LIKE '%Rejeitadas' THEN CAST(NULL AS INT)
-         ELSE SUM(CASE WHEN X.Flag = 1
+    SUM(CASE WHEN X.Flag = 1 AND F.HL7SexCode = 'M' THEN 1 ELSE 0 END) AS Homens,
+    SUM(CASE WHEN X.Flag = 1 AND F.HL7SexCode = 'F' THEN 1 ELSE 0 END) AS Mulheres,
+    SUM(CASE WHEN X.Flag = 1
               AND (F.HL7SexCode NOT IN ('M','F') OR F.HL7SexCode IS NULL)
-              THEN 1 ELSE 0 END)
-    END AS NaoEspecificado,
-    CASE WHEN X.Codigo LIKE '%Rejeitadas' THEN CAST(NULL AS INT)
-         ELSE SUM(X.Flag) END AS Total,
+              THEN 1 ELSE 0 END) AS NaoEspecificado,
+    SUM(X.Flag) AS Total,
     CASE WHEN X.Codigo = 'Pendentes' THEN SUM(CASE WHEN X.Flag = 1 AND F.IdadeDias BETWEEN 0 AND 7 THEN 1 ELSE 0 END) END AS [0_7],
     CASE WHEN X.Codigo = 'Pendentes' THEN SUM(CASE WHEN X.Flag = 1 AND F.IdadeDias BETWEEN 8 AND 44 THEN 1 ELSE 0 END) END AS [8_44],
     CASE WHEN X.Codigo = 'Pendentes' THEN SUM(CASE WHEN X.Flag = 1 AND F.IdadeDias BETWEEN 45 AND 60 THEN 1 ELSE 0 END) END AS [45_60],
@@ -104,21 +106,21 @@ CROSS APPLY (VALUES
  ('Recebidas', F.RegistadaNaSemana),
  ('Testadas', F.TestadaNaSemana),
  ('Validadas', F.ValidadaNaSemana),
- ('Rejeitadas', CAST(0 AS INT)),
+ ('Rejeitadas', F.RejeitadaNaSemana),
  ('Pendentes', F.PendenteNoCorte),
  ('Contaminadas', CASE WHEN F.AnalysisDateTime >= @WeekStart AND F.AnalysisDateTime < @WeekEnd
                      AND (F.ContaminadaMGIT = 1 OR F.ContaminadaLJ = 1) THEN 1 ELSE 0 END),
  ('MGIT_Registadas', CASE WHEN F.TemMGIT = 1 THEN F.RegistadaNaSemana ELSE 0 END),
  ('MGIT_Testadas', CASE WHEN F.TemMGIT = 1 THEN F.TestadaNaSemana ELSE 0 END),
  ('MGIT_Validadas', CASE WHEN F.TemMGIT = 1 THEN F.ValidadaNaSemana ELSE 0 END),
- ('MGIT_Rejeitadas', CAST(0 AS INT)),
+ ('MGIT_Rejeitadas', CASE WHEN F.TemMGIT = 1 THEN F.RejeitadaNaSemana ELSE 0 END),
  ('MGIT_Pendentes', CASE WHEN F.TemMGIT = 1 THEN F.PendenteNoCorte ELSE 0 END),
  ('MGIT_Contaminadas', CASE WHEN F.TemMGIT = 1 AND F.AnalysisDateTime >= @WeekStart
              AND F.AnalysisDateTime < @WeekEnd THEN F.ContaminadaMGIT ELSE 0 END),
  ('LJ_Registadas', CASE WHEN F.TemLJ = 1 THEN F.RegistadaNaSemana ELSE 0 END),
  ('LJ_Testadas', CASE WHEN F.TemLJ = 1 THEN F.TestadaNaSemana ELSE 0 END),
  ('LJ_Validadas', CASE WHEN F.TemLJ = 1 THEN F.ValidadaNaSemana ELSE 0 END),
- ('LJ_Rejeitadas', CAST(0 AS INT)),
+ ('LJ_Rejeitadas', CASE WHEN F.TemLJ = 1 THEN F.RejeitadaNaSemana ELSE 0 END),
  ('LJ_Pendentes', CASE WHEN F.TemLJ = 1 THEN F.PendenteNoCorte ELSE 0 END),
  ('LJ_Contaminadas', CASE WHEN F.TemLJ = 1 AND F.AnalysisDateTime >= @WeekStart
              AND F.AnalysisDateTime < @WeekEnd THEN F.ContaminadaLJ ELSE 0 END)
