@@ -5,7 +5,7 @@ Implementação na branch **tb**. Laboratórios: **Carmelo, Nampula, Maputo e Be
 ## Template oficial
 Colocar o template aprovado em `templates/TB_Weekly_Report_Template.xlsx`.
 
-Folhas: **Resumo, Comparação, TRL, Pendências, Resistência, Resultados, Desagregação Sexo**.
+Folhas: **Resumo, Comparação, TRL, Pendências, Rejeições (criada automaticamente), Resistência, Resultados, Desagregação Sexo**.
 
 ## Configuração
 Instalar `pip install -r requirements.txt` e copiar `.env.example` para `.env`.
@@ -17,7 +17,7 @@ A variável opcional `REPORT_SHEET_PASSWORD` protege a folha nominal contra edi�
 python src/generate_report.py --week-start 2026-09-13
 ```
 
-São executadas cinco queries SQL por laboratório, todas com parâmetros `(week_start, lab)`.
+São executadas seis queries SQL por laboratório (01 a 06), todas com parâmetros `(week_start, lab)`.
 O ficheiro final é encriptado para exigir senha na abertura; a folha Resultados recebe protecção contra edição.
 
 ## Regras e ressalvas
@@ -25,12 +25,15 @@ O ficheiro final é encriptado para exigir senha na abertura; a folha Resultados
 - MGIT 44 dias; LJ 60 dias; LPA 7 dias; TSA 30 dias.
 - Backlog à data de corte: amostras registadas até ao fim da semana, ainda sem resultado conhecido nessa data. Datas históricas podem estar incompletas.
 - Pendências: 0–7, 8–44, **45–60**, >60 dias. Evita dupla contagem do dia 44.
-- Rejeitadas: **em branco**, até validação de um código inequívoco no sistema.
+- Rejeitadas: uma amostra por registo com `LIMSRejectionCode` ou `LIMSRejectionDesc` não vazios, **registada na semana** (`RegisteredDateTime`). O agrupamento de motivos usa sinónimos PT/EN na Query 06. `COM`/Comentário aparece destacado e precisa de confirmação de que é rejeição efectiva.
+- Rejeições por MGIT/LJ só são atribuídas ao método quando a amostra contém evidência do método. Rejeições sem método conhecido constam do total geral, mas não das linhas MGIT/LJ.
+- Como não há data específica da rejeição validada, a data de registo é usada para o período; reprocessamento de semanas antigas pode reflectir códigos adicionados posteriormente.
+- A folha **Rejeições** mostra ranking por laboratório, percentagem e detalhe dos códigos/descrições originais, sem nomes de pacientes. A geração falha se os totais não coincidirem com a Query 05.
 - Atribuição do laboratório usa `TestingFacilityName`, senão `LIMSFacilityName`. As variantes reais devem ser validadas na base.
 - Os campos por método MGIT/LJ podem não cobrir registos pendentes que ainda não identificam qual método será executado.
 - Os totais somados de amostras por laboratório não representam automaticamente pacientes únicos.
 - Nunca versionar `.env` ou relatórios nominais. Atenção: há um relatório já versionado na pasta reports; validar a confidencialidade.
 
 ## Validação
-Executar primeiro os testes de SQL no servidor e comparar os quatro laboratórios, especialmente os registos pendentes e as designações das unidades.
+Executar `python src/test_query_06.py --week-start 2026-09-13` antes de gerar o Excel; depois executar os testes de SQL no servidor e comparar os quatro laboratórios, especialmente os registos pendentes e as designações das unidades.
 Não considerar as métricas rejeitadas ou a desagregação por método como validadas até confirmação laboratorial.
