@@ -316,6 +316,9 @@ def write_rejections(wb, data, week_start, week_end):
                 count,
             ))
         count_main = metric_value(data, lab, "Rejeitadas")
+        if count_main is None and not data[lab].get("fluxo"):
+            # Não houve registos históricos deste laboratório antes do corte.
+            count_main = 0
         if count_main is None or int(count_main) != total_reasons:
             raise ValueError(
                 f"Rejeições não conciliadas em {lab}: "
