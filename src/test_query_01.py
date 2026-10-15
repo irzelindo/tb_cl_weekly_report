@@ -18,7 +18,7 @@ def main():
 
     rows = execute_query_file(
         BASE_DIR / "sql" / "01_indicadores.sql",
-        params=(week_start,),
+        params=(week_start, 'Maputo'),
     )
 
     if not rows:
