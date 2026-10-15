@@ -17,7 +17,7 @@ def main():
 
     rows = execute_query_file(
         BASE_DIR / "sql" / "04_line_list.sql",
-        params=(week_start,),
+        params=(week_start, 'Maputo'),
     )
 
     print(f"Registos devolvidos: {len(rows)}")
