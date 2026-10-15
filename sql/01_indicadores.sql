@@ -242,22 +242,30 @@ WITH Base AS (
             ELSE 0
         END AS BedaquilinaLinezolidaResistente
     FROM dbo.TBCultura AS T
-    CROSS APPLY (SELECT UPPER(CONVERT(NVARCHAR(255), COALESCE(
-        NULLIF(LTRIM(RTRIM(T.TestingFacilityName)), ''),
-        NULLIF(LTRIM(RTRIM(T.LIMSFacilityName)), ''), N''
-    ))) COLLATE Latin1_General_CI_AI AS NomeBruto) AS LabRaw
-    CROSS APPLY (SELECT CASE
-        WHEN LabRaw.NomeBruto LIKE N'%CARMELO%' THEN N'Carmelo'
-        WHEN LabRaw.NomeBruto LIKE N'%NAMPULA%' THEN N'Nampula'
-        WHEN LabRaw.NomeBruto LIKE N'%PTB%INS%'
-          OR LabRaw.NomeBruto IN (N'TB LABORATORIO', N'TB LABORATÓRIO')
-            THEN N'Maputo'
-        WHEN LabRaw.NomeBruto LIKE N'%BEIRA%' THEN N'Beira'
-        ELSE NULL
-    END AS Nome) AS Lab
-
+        CROSS APPLY (
+            SELECT UPPER(
+                    CONVERT(
+                        NVARCHAR(255),
+                        COALESCE(
+                            NULLIF(LTRIM(RTRIM(T.TestingFacilityName)), ''),
+                            NULLIF(LTRIM(RTRIM(T.LIMSFacilityName)), ''),
+                            N''
+                        )
+                    )
+                ) COLLATE Latin1_General_CI_AI AS NomeBruto
+        ) AS LabRaw
+        CROSS APPLY (
+            SELECT CASE
+                    WHEN LabRaw.NomeBruto LIKE '%CARMELO%'
+                    OR LabRaw.NomeBruto IN ('TB LABORATORIO', 'TB LABORATÓRIO') THEN 'Carmelo'
+                    WHEN LabRaw.NomeBruto LIKE '%NAMPULA%' THEN 'Nampula'
+                    WHEN LabRaw.NomeBruto LIKE '%PTB%INS%' THEN 'Maputo'
+                    WHEN LabRaw.NomeBruto LIKE '%BEIRA%' THEN 'Beira'
+                    ELSE NULL
+                END AS Nome
+        ) AS Lab
     WHERE Lab.Nome = @LabName
-      AND T.HL7ResultStatusCode = 'F'
+        AND T.HL7ResultStatusCode = 'F'
         AND T.AnalysisDateTime >= @WeekStart
         AND T.AnalysisDateTime < @WeekEnd
 ),
