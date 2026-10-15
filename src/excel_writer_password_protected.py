@@ -581,17 +581,12 @@ PORTUGUESE_MONTHS = {
 
 
 
-def build_report_password(week_start):
-    """
-    Regra pedida:
-      WeekStart 13/09/2026 -> 20desetembrode2026
-
-    A senha usa a fronteira final da janela semanal: week_start + 7 dias.
-    """
-    password_date = week_start + timedelta(days=7)
-    month_name = PORTUGUESE_MONTHS[password_date.month]
-    return f"{password_date.day}de{month_name}de{password_date.year}".lower()
-
+def build_report_password(week_start=None):
+    """Senha estática definida no .env, independente da semana."""
+    password = os.getenv("REPORT_PASSWORD")
+    if not password:
+        raise RuntimeError("Defina REPORT_PASSWORD no .env antes de gerar o Excel.")
+    return password
 
 
 def _infer_password_from_filename(template_path):
