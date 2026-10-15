@@ -4,12 +4,13 @@ SET NOCOUNT ON;
    PARÂMETROS RECEBIDOS DO PYTHON
    ============================================================ */
 DECLARE @WeekStart DATE = ?;
+DECLARE @LabName NVARCHAR(20) = ?;
 DECLARE @WeekEnd   DATE = DATEADD(DAY, 7, @WeekStart);
 
 /* Targets operacionais.
-   Se o PNCT adoptar 60 dias para LJ, alterar apenas esta constante. */
+   LJ = 60 dias conforme template validado pelo grupo. */
 DECLARE @MGITTargetDias INT = 44;
-DECLARE @LJTargetDias   INT = 62;
+DECLARE @LJTargetDias   INT = 60;
 DECLARE @LPATargetDias  INT = 7;
 DECLARE @TSATargetDias  INT = 30;
 
@@ -133,7 +134,22 @@ DECLARE @TSATargetDias  INT = 30;
           END AS IsSputum
 
     FROM dbo.TBCultura AS T
-    WHERE T.HL7ResultStatusCode = 'F'
+    CROSS APPLY (SELECT UPPER(CONVERT(NVARCHAR(255), COALESCE(
+        NULLIF(LTRIM(RTRIM(T.TestingFacilityName)), ''),
+        NULLIF(LTRIM(RTRIM(T.LIMSFacilityName)), ''), N''
+    ))) COLLATE Latin1_General_CI_AI AS NomeBruto) AS LabRaw
+    CROSS APPLY (SELECT CASE
+        WHEN LabRaw.NomeBruto LIKE N'%CARMELO%' THEN N'Carmelo'
+        WHEN LabRaw.NomeBruto LIKE N'%NAMPULA%' THEN N'Nampula'
+        WHEN LabRaw.NomeBruto LIKE N'%PTB%INS%'
+          OR LabRaw.NomeBruto IN (N'TB LABORATORIO', N'TB LABORATÓRIO')
+            THEN N'Maputo'
+        WHEN LabRaw.NomeBruto LIKE N'%BEIRA%' THEN N'Beira'
+        ELSE NULL
+    END AS Nome) AS Lab
+
+    WHERE Lab.Nome = @LabName
+      AND T.HL7ResultStatusCode = 'F'
       AND T.AnalysisDateTime >= @WeekStart
       AND T.AnalysisDateTime <  @WeekEnd
 ),
@@ -193,7 +209,7 @@ Exames AS
 
     /* ========================================================
        2. CULTURA SÓLIDA (LJ)
-       Target operacional configurável: 62 dias.
+       Target operacional configurável: 60 dias.
        ======================================================== */
     SELECT
           ID
@@ -355,10 +371,10 @@ SELECT
     , RegistosComTempoValido
     , TotalRegistos - RegistosComTempoValido AS [Registos sem tempo valido]
 
-    , MediaColheitaRegisto AS [Media Colheita ao Registo]
-    , MediaRegistoProcessamento AS [Media Registo ao Processamento]
-    , MediaProcessamentoValidacao AS [Media Processamento a Validacao]
-    , MediaTotal AS [Media Total Colheita a Validacao]
+    , CAST(ROUND(MediaColheitaRegisto, 0) AS INT) AS [Media Colheita ao Registo]
+    , CAST(ROUND(MediaRegistoProcessamento, 0) AS INT) AS [Media Registo ao Processamento]
+    , CAST(ROUND(MediaProcessamentoValidacao, 0) AS INT) AS [Media Processamento a Validacao]
+    , CAST(ROUND(MediaTotal, 0) AS INT) AS [Media Total Colheita a Validacao]
 
     , CASE
           WHEN Ordem = 1 THEN CAST(@MGITTargetDias AS VARCHAR(3)) + ' dias (do registo ao resultado final)'
@@ -368,7 +384,7 @@ SELECT
           WHEN Ordem = 5 THEN CAST(@TSATargetDias AS VARCHAR(3)) + ' dias após cultura positiva'
       END AS Target
 
-    , MediaTarget AS [Media do tempo avaliado para o Target]
+    , CAST(ROUND(MediaTarget, 0) AS INT) AS [Media do tempo avaliado para o Target]
     , MaiorTempoTarget AS [Maior tempo para o Target]
     , RegistosForaPrazo AS [Registos fora do prazo]
 
