@@ -10,14 +10,14 @@ def main():
     week_start = date(2026, 9, 13)
 
     print("=" * 110)
-    print("TESTE - QUERY 02 - TAT SEMANAL")
+    print("TESTE - QUERY 02 - TRL SEMANAL")
     print("=" * 110)
     print(f"WeekStart : {week_start}")
     print()
 
     rows = execute_query_file(
         BASE_DIR / "sql" / "02_tat.sql",
-        params=(week_start,),
+        params=(week_start, 'Maputo'),
     )
 
     if not rows:
@@ -85,7 +85,7 @@ def main():
         raise AssertionError("Target LJ deve ser 60 ou 62 dias.")
 
     print("=" * 110)
-    print(f"PASSOU: Query 02 devolveu {len(rows)} categorias de TAT.")
+    print(f"PASSOU: Query 02 devolveu {len(rows)} categorias de TRL.")
     print("=" * 110)
 
 
