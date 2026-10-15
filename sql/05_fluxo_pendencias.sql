@@ -4,7 +4,8 @@ SET NOCOUNT ON;
 /*
 Fluxo semanal + backlog à data de corte. SQL Server 2014.
 Parâmetros: (1) semana inicial, (2) laboratório canónico.
-Rejeições: NULL até confirmar um campo/código inequívoco de rejeição na TBCultura.
+Rejeições: Código/descrição preenchido e RegisteredDateTime dentro da semana;
+          COM/Comentário requer confirmação operacional.
 As datas dos resultados permitem reconstruir o backlog histórico quando preenchidas.
 */
 DECLARE @WeekStart DATE = ?;
