@@ -17,6 +17,7 @@ QUERIES = {
     "resistencia": "03_resistencia.sql",
     "resultados": "04_line_list.sql",
     "fluxo": "05_fluxo_pendencias.sql",
+    "rejeicoes": "06_motivos_rejeicao.sql",
 }
 
 
