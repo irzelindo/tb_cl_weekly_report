@@ -4,10 +4,13 @@ Executar na raiz do projecto:
     python -m unittest discover -s tests -p 'test_report_layout.py'
 """
 import unittest
+import sys
+from pathlib import Path
 from datetime import date
 from openpyxl import Workbook
 
-from src.multilab_writer import (
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+from multilab_writer import (
     LABS, remove_empty_summary_alerts, write_rejections,
 )
 
