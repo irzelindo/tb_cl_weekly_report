@@ -28,7 +28,7 @@ O ficheiro final é encriptado para exigir senha na abertura; a folha Resultados
 - Rejeitadas: uma amostra por registo com `LIMSRejectionCode` ou `LIMSRejectionDesc` não vazios, **registada na semana** (`RegisteredDateTime`). O agrupamento de motivos usa sinónimos PT/EN na Query 06. `COM`/Comentário aparece destacado e precisa de confirmação de que é rejeição efectiva.
 - Rejeições por MGIT/LJ só são atribuídas ao método quando a amostra contém evidência do método. Rejeições sem método conhecido constam do total geral, mas não das linhas MGIT/LJ.
 - Como não há data específica da rejeição validada, a data de registo é usada para o período; reprocessamento de semanas antigas pode reflectir códigos adicionados posteriormente.
-- A folha **Rejeições** mostra ranking por laboratório, percentagem e detalhe dos códigos/descrições originais, sem nomes de pacientes. A geração falha se os totais não coincidirem com a Query 05.
+- A folha **Rejeições** apresenta ranking e detalhe apenas por laboratório, motivo agrupado, quantidade e percentagem. **Códigos e descrições internos não são exportados para o Excel**. A geração falha se os totais não coincidirem com a Query 05.
 - Atribuição do laboratório usa `TestingFacilityName`, senão `LIMSFacilityName`. As variantes reais devem ser validadas na base.
 - Os campos por método MGIT/LJ podem não cobrir registos pendentes que ainda não identificam qual método será executado.
 - Os totais somados de amostras por laboratório não representam automaticamente pacientes únicos.
@@ -37,3 +37,4 @@ O ficheiro final é encriptado para exigir senha na abertura; a folha Resultados
 ## Validação
 Executar `python src/test_query_06.py --week-start 2026-09-13` antes de gerar o Excel; depois executar os testes de SQL no servidor e comparar os quatro laboratórios, especialmente os registos pendentes e as designações das unidades.
 Não considerar as métricas rejeitadas ou a desagregação por método como validadas até confirmação laboratorial.
+- O quadro vazio «Leitura rápida / Alertas» foi retirado do Resumo. A legenda e a referência à desagregação por sexo são preservadas, imediatamente abaixo da tabela de cultura.
