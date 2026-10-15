@@ -32,7 +32,8 @@ def main():
         if r["Total"] is not None:
             assert r["Total"] == sum(r[k] or 0 for k in ("Homens","Mulheres","NaoEspecificado"))
     print("PASSOU: desagregação por sexo consistente.")
-    print("REJEITADAS podem permanecer NULL até validar código específico no sistema.")
+    assert "Rejeitadas" in by_code, "Falta a linha Rejeitadas."
+    print("PASSOU: Rejeitadas contabilizadas com LIMSRejectionCode/Desc.")
 
 if __name__ == "__main__":
     main()
