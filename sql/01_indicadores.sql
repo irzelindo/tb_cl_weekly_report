@@ -3,6 +3,7 @@ SET NOCOUNT ON;
  PARÂMETROS RECEBIDOS DO PYTHON
  ============================================================ */
 DECLARE @WeekStart DATE = ?;
+DECLARE @LabName NVARCHAR(20) = ?;
 DECLARE @WeekEnd DATE = DATEADD(DAY, 7, @WeekStart);
 ;
 WITH Base AS (
@@ -164,7 +165,7 @@ WITH Base AS (
              'Não detectado' no LPA1 como MNT. */
             WHEN (
                 NULLIF(LTRIM(RTRIM(T.LPAComplexMTBResult)), '') IS NOT NULL
-                OR NULLIF(LTRIM(RTRIM(T.LPAIsoniazi dResult)), '') IS NOT NULL
+                OR NULLIF(LTRIM(RTRIM(T.LPAIsoniazidResult)), '') IS NOT NULL
                 OR NULLIF(LTRIM(RTRIM(T.LPARifampicinResult)), '') IS NOT NULL
             )
             AND LTRIM(RTRIM(T.TBIDResult)) IN (
@@ -241,7 +242,22 @@ WITH Base AS (
             ELSE 0
         END AS BedaquilinaLinezolidaResistente
     FROM dbo.TBCultura AS T
-    WHERE T.HL7ResultStatusCode = 'F'
+    CROSS APPLY (SELECT UPPER(CONVERT(NVARCHAR(255), COALESCE(
+        NULLIF(LTRIM(RTRIM(T.TestingFacilityName)), ''),
+        NULLIF(LTRIM(RTRIM(T.LIMSFacilityName)), ''), N''
+    ))) COLLATE Latin1_General_CI_AI AS NomeBruto) AS LabRaw
+    CROSS APPLY (SELECT CASE
+        WHEN LabRaw.NomeBruto LIKE N'%CARMELO%' THEN N'Carmelo'
+        WHEN LabRaw.NomeBruto LIKE N'%NAMPULA%' THEN N'Nampula'
+        WHEN LabRaw.NomeBruto LIKE N'%PTB%INS%'
+          OR LabRaw.NomeBruto IN (N'TB LABORATORIO', N'TB LABORATÓRIO')
+            THEN N'Maputo'
+        WHEN LabRaw.NomeBruto LIKE N'%BEIRA%' THEN N'Beira'
+        ELSE NULL
+    END AS Nome) AS Lab
+
+    WHERE Lab.Nome = @LabName
+      AND T.HL7ResultStatusCode = 'F'
         AND T.AnalysisDateTime >= @WeekStart
         AND T.AnalysisDateTime < @WeekEnd
 ),
