@@ -281,43 +281,79 @@ def write_results(wb, data, protection_password):
 
 
 
-def write_rejections(wb, data, week_start, week_end):
-    """Folha compacta de motivos: ranking PT/EN e detalhe por código/descrição.
+def remove_empty_summary_alerts(wb):
+    """Retira a tabela de alertas não implementada sem perder as notas/legenda.
 
-    O total de cada laboratório tem de conciliar com a Query 05.
-    A categoria COM/Comentário continua visível, marcada para revisão.
+    Templates antigos: A41:F46 contém a tabela vazia e A47:F52
+    contém a nota de sexo e a legenda. Deslocamos apenas estas
+    informações úteis para A41:F46, preservando o estilo original.
+    Templates já corrigidos não são alterados.
+    """
+    ws = wb["Resumo"]
+    current = str(ws["A41"].value or "").upper()
+    if "LEITURA RÁPIDA" not in current and "ALERTAS" not in current:
+        return
+
+    notes = []
+    for r in range(47, 53):
+        anchor = ws.cell(r, 1)
+        notes.append((
+            anchor.value,
+            copy(anchor._style),
+            ws.row_dimensions[r].height,
+        ))
+
+    for merged in list(ws.merged_cells.ranges):
+        if merged.min_row <= 52 and merged.max_row >= 41:
+            ws.unmerge_cells(str(merged))
+
+    for row in ws.iter_rows(min_row=41, max_row=52, min_col=1, max_col=6):
+        for cell in row:
+            cell.value = None
+            cell._style = None
+
+    for r, (value, style, height) in enumerate(notes, 41):
+        anchor = ws.cell(r, 1)
+        anchor.value = value
+        if style is not None:
+            anchor._style = copy(style)
+        if height is not None:
+            ws.row_dimensions[r].height = height
+        ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=6)
+
+    ws.delete_rows(47, 6)
+    ws.print_area = "A1:F46"
+
+
+def write_rejections(wb, data, week_start, week_end):
+    """Ranking dos motivos e detalhe legível por laboratório, sem códigos internos.
+
+    As queries continuam a usar códigos e descrições para normalização,
+    mas estes dados brutos NÃO são escritos no Excel distribuído.
     """
     from collections import defaultdict
     from openpyxl.styles import PatternFill
     from openpyxl.formatting.rule import DataBarRule
-    from openpyxl.utils import get_column_letter
+    from openpyxl.worksheet.properties import PageSetupProperties
 
     name = "Rejeições"
     ws = wb[name] if name in wb.sheetnames else wb.create_sheet(name, 4)
     ws.sheet_view.showGridLines = False
 
-    # Conciliar com a população (mesmo período e laboratório) da Query 05.
+    # Agregar novamente, agora por laboratório e categoria normalizada.
     groups = defaultdict(lambda: defaultdict(int))
-    detailed = []
     for lab in LABS:
-        rows = data[lab].get("rejeicoes", [])
         total_reasons = 0
-        for rec in rows:
+        for rec in data[lab].get("rejeicoes", []):
             count = int(rec.get("Quantidade") or 0)
             if count < 0:
                 raise ValueError("Quantidade negativa de motivos de rejeição.")
             category = rec.get("MotivoAgrupado") or "Outros / não classificados"
             groups[category][lab] += count
             total_reasons += count
-            detailed.append((
-                lab, category,
-                rec.get("CodigoOriginal") or "(sem código)",
-                rec.get("DescricaoOriginal") or "(sem descrição)",
-                count,
-            ))
+
         count_main = metric_value(data, lab, "Rejeitadas")
         if count_main is None and not data[lab].get("fluxo"):
-            # Não houve registos históricos deste laboratório antes do corte.
             count_main = 0
         if count_main is None or int(count_main) != total_reasons:
             raise ValueError(
@@ -326,138 +362,166 @@ def write_rejections(wb, data, week_start, week_end):
                 "Validar os filtros antes de divulgar o relatório."
             )
 
+    # Limpar eventual versão anterior da folha, incluindo merges.
+    for merged in list(ws.merged_cells.ranges):
+        ws.unmerge_cells(str(merged))
     for row in ws:
         for cell in row:
             if not isinstance(cell, MergedCell):
                 cell.value = None
+    ws.auto_filter.ref = None
 
     ws.merge_cells("A1:H2")
-    ws["A1"] = "REJEIÇÕES — MOTIVOS EQUIVALENTES POR LABORATÓRIO"
+    ws["A1"] = "REJEIÇÕES — MOTIVOS AGRUPADOS POR LABORATÓRIO"
     ws["A1"].fill = PatternFill("solid", fgColor="F4B183")
     ws["A1"].font = Font(name="Cambria", bold=True, size=14, color="242424")
     ws["A1"].alignment = Alignment(horizontal="center", vertical="center")
 
     ws.merge_cells("A3:H3")
     ws["A3"] = (
-        f"Registos de {week_start:%d/%m/%Y} a {week_end:%d/%m/%Y} | "
-        "uma rejeição por amostra; COM/Comentário requer validação."
+        f"Amostras registadas de {week_start:%d/%m/%Y} "
+        f"a {week_end:%d/%m/%Y}. "
+        "A categoria «Comentário» requer validação técnica."
     )
     ws["A3"].font = Font(name="Cambria", size=10, italic=True)
     ws["A3"].alignment = Alignment(vertical="center", wrap_text=True)
-    ws.row_dimensions[3].height = 28
+    ws.row_dimensions[3].height = 30
 
-    summary_headers = [
-        "Motivo agrupado", *LABS, "Total", "% do total", "Observação"
-    ]
-    for col, label in enumerate(summary_headers, 1):
-        safe_write(ws, 5, col, label)
+    for col, title in enumerate(
+        ["Motivo agrupado", *LABS, "Total", "% do total", "Observação"], 1
+    ):
+        safe_write(ws, 5, col, title)
 
-    totals = {}
-    for group, per_lab in groups.items():
-        totals[group] = sum(per_lab.values())
+    totals = {group: sum(by_lab.values()) for group, by_lab in groups.items()}
     grand_total = sum(totals.values())
     ordered = sorted(groups, key=lambda g: (-totals[g], g.casefold()))
 
-    for idx, group in enumerate(ordered, start=6):
-        safe_write(ws, idx, 1, group)
+    for row_no, group in enumerate(ordered, start=6):
+        safe_write(ws, row_no, 1, group)
         for col, lab in enumerate(LABS, start=2):
-            safe_write(ws, idx, col, groups[group][lab], "0")
-        safe_write(ws, idx, 6, totals[group], "0")
-        safe_write(ws, idx, 7, totals[group] / grand_total if grand_total else None, "0.0%")
+            safe_write(ws, row_no, col, groups[group][lab], "0")
+        safe_write(ws, row_no, 6, totals[group], "0")
         safe_write(
-            ws, idx, 8,
-            "Conferir significado do código no LIMS"
-            if ("Comentário" in group or "por validar" in group)
-            else ""
+            ws, row_no, 7,
+            totals[group] / grand_total if grand_total else None, "0.0%"
         )
-        ws.row_dimensions[idx].height = 27
+        safe_write(
+            ws, row_no, 8,
+            "Classificação pendente de validação técnica"
+            if ("Comentário" in group or "por validar" in group) else ""
+        )
+        ws.row_dimensions[row_no].height = 27
 
     summary_end = 5 + len(ordered)
     total_row = summary_end + 1
     safe_write(ws, total_row, 1, "TOTAL SEMANAL")
-    for col, lab in enumerate(LABS, start=2):
-        safe_write(ws, total_row, col, sum(groups[g][lab] for g in ordered), "0")
+    for col, lab in enumerate(LABS, 2):
+        safe_write(
+            ws, total_row, col,
+            sum(groups[group][lab] for group in ordered), "0"
+        )
     safe_write(ws, total_row, 6, grand_total, "0")
     safe_write(ws, total_row, 7, 1 if grand_total else None, "0.0%")
 
-    # Motivos originais para investigação de equivalências entre idiomas.
-    details_title = total_row + 3
+    # Detalhe para o utilizador: apenas laboratório e motivos agrupados.
+    # Não incluir CodigoOriginal nem DescricaoOriginal.
+    detail_title_row = total_row + 3
     ws.merge_cells(
-        start_row=details_title, start_column=1,
-        end_row=details_title, end_column=8
+        start_row=detail_title_row, start_column=1,
+        end_row=detail_title_row, end_column=8
     )
-    ws.cell(details_title, 1, "DETALHE AUDITÁVEL — CÓDIGO E DESCRIÇÃO ORIGINAIS")
-    detail_header_row = details_title + 1
-    columns = [
-        "Laboratório", "Motivo agrupado", "Código original",
-        "Descrição original", "Quantidade", "% dentro do laboratório"
-    ]
-    for col, label in enumerate(columns, start=1):
-        safe_write(ws, detail_header_row, col, label)
-    detailed.sort(key=lambda r: (LABS.index(r[0]), -r[4], r[1], r[2]))
-    lab_totals = {lab: sum(groups[g][lab] for g in ordered) for lab in LABS}
-    for row_no, (lab, group, code, desc, count) in enumerate(
-        detailed, start=detail_header_row + 1
+    ws.cell(detail_title_row, 1, "DETALHE DOS MOTIVOS POR LABORATÓRIO")
+    detail_header_row = detail_title_row + 1
+    for col, title in enumerate(
+        ["Laboratório", "Motivo agrupado", "Quantidade", "% no laboratório"], 1
     ):
-        values = (
-            lab, group, code, desc, count,
-            count / lab_totals[lab] if lab_totals[lab] else None
-        )
-        for col, value in enumerate(values, 1):
-            safe_write(ws, row_no, col, value, "0.0%" if col == 6 else
-                       "0" if col == 5 else None)
+        safe_write(ws, detail_header_row, col, title)
 
-    light_border = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
+    detail_rows = [
+        (lab, group, groups[group][lab])
+        for lab in LABS
+        for group in ordered
+        if groups[group][lab] > 0
+    ]
+    detail_rows.sort(key=lambda r: (LABS.index(r[0]), -r[2], r[1].casefold()))
+    totals_by_lab = {
+        lab: sum(groups[group][lab] for group in ordered) for lab in LABS
+    }
+    for row_no, (lab, group, count) in enumerate(
+        detail_rows, start=detail_header_row + 1
+    ):
+        safe_write(ws, row_no, 1, lab)
+        safe_write(ws, row_no, 2, group)
+        safe_write(ws, row_no, 3, count, "0")
+        safe_write(
+            ws, row_no, 4,
+            count / totals_by_lab[lab] if totals_by_lab[lab] else None, "0.0%"
+        )
+
+    border = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
     header_fill = PatternFill("solid", fgColor="F4B183")
     total_fill = PatternFill("solid", fgColor="D9E2F3")
     warning_fill = PatternFill("solid", fgColor="FFF2CC")
-    for hdr in (5, detail_header_row):
-        for cell in ws[hdr][:8 if hdr == 5 else 6]:
-            cell.font = Font(name="Cambria", size=10, bold=True)
-            cell.fill = header_fill
-            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-            cell.border = light_border
-        ws.row_dimensions[hdr].height = 34
 
-    for row_num in range(6, total_row + 1):
+    for header_row, ncols in ((5, 8), (detail_header_row, 4)):
+        for col in range(1, ncols + 1):
+            cell = ws.cell(header_row, col)
+            cell.fill = header_fill
+            cell.font = Font(name="Cambria", size=10, bold=True)
+            cell.alignment = Alignment(
+                horizontal="center", vertical="center", wrap_text=True
+            )
+            cell.border = border
+        ws.row_dimensions[header_row].height = 34
+
+    for row_no in range(6, total_row + 1):
         for col in range(1, 9):
-            cell = ws.cell(row_num, col)
-            cell.font = Font(name="Cambria", size=10, bold=(row_num == total_row))
-            cell.border = light_border
+            cell = ws.cell(row_no, col)
+            cell.font = Font(
+                name="Cambria", size=10, bold=(row_no == total_row)
+            )
+            cell.border = border
             cell.alignment = Alignment(
                 horizontal="left" if col in (1, 8) else "center",
                 vertical="center", wrap_text=True
             )
-            if row_num == total_row:
+            if row_no == total_row:
                 cell.fill = total_fill
-            elif "Comentário" in str(ws.cell(row_num, 1).value):
+            elif "Comentário" in str(ws.cell(row_no, 1).value):
                 cell.fill = warning_fill
 
-    for row_num in range(detail_header_row + 1, detail_header_row + 1 + len(detailed)):
-        for col in range(1, 7):
-            cell = ws.cell(row_num, col)
+    for row_no in range(detail_header_row + 1,
+                        detail_header_row + len(detail_rows) + 1):
+        ws.row_dimensions[row_no].height = 24
+        for col in range(1, 5):
+            cell = ws.cell(row_no, col)
             cell.font = Font(name="Cambria", size=10)
-            cell.border = light_border
+            cell.border = border
             cell.alignment = Alignment(
-                horizontal="left" if col in (1,2,3,4) else "center",
+                horizontal="left" if col in (1, 2) else "center",
                 vertical="center", wrap_text=True
             )
-    for col, width in dict(A=38, B=15, C=15, D=39, E=14, F=15, G=14, H=39).items():
+
+    for col, width in {
+        "A": 38, "B": 34, "C": 16, "D": 20,
+        "E": 14, "F": 16, "G": 15, "H": 40,
+    }.items():
         ws.column_dimensions[col].width = width
 
     if ordered:
         ws.conditional_formatting.add(
             f"F6:F{summary_end}",
-            DataBarRule(start_type="num", start_value=0,
-                        end_type="max", color="F4B183", showValue=True)
+            DataBarRule(
+                start_type="num", start_value=0,
+                end_type="max", color="F4B183", showValue=True
+            )
         )
-    if detailed:
+    if detail_rows:
         ws.auto_filter.ref = (
-            f"A{detail_header_row}:F{detail_header_row + len(detailed)}"
+            f"A{detail_header_row}:D{detail_header_row + len(detail_rows)}"
         )
     ws.freeze_panes = "B6"
     ws.print_options.horizontalCentered = True
-    from openpyxl.worksheet.properties import PageSetupProperties
     if ws.sheet_properties.pageSetUpPr is None:
         ws.sheet_properties.pageSetUpPr = PageSetupProperties()
     ws.sheet_properties.pageSetUpPr.fitToPage = True
@@ -465,6 +529,7 @@ def write_rejections(wb, data, week_start, week_end):
     ws.page_setup.fitToWidth = 1
     ws.page_setup.fitToHeight = 0
     return grand_total
+
 
 def generate_multilab_excel(template_path, output_path, week_start, week_end,
                             data, report_password, sheet_password):
@@ -478,6 +543,7 @@ def generate_multilab_excel(template_path, output_path, week_start, week_end,
         raise ValueError(f"Folhas em falta: {required - set(wb.sheetnames)}")
     if not all(lab in data for lab in LABS):
         raise ValueError("O relatório exige dados para os quatro laboratórios.")
+    remove_empty_summary_alerts(wb)
     write_metadata(wb, week_start, week_end)
     write_comparisons(wb, data)
     write_sex(wb, data)
