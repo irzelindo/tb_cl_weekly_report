@@ -3,3 +3,7 @@
 __pycache__/
 *.pyc
 reports/*.xlsx
+# Evitar divulgar dados nominais do relatório no GitHub
+reports/**/*.xlsx
+reports/**/*.xls
+.env
